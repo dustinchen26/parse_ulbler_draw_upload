@@ -1,0 +1,331 @@
+<!-- 
+  Copyright © [2023] [Dustin_Chen]. All rights reserved.
+  Author: Dustin_Chen
+  Email:  Dustin_Chen@compal.com or chuhpsdustin@gmail.com
+-->
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parse du_stats_XXX.txt UL_BLER and draw</title>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            line-height: 1.2;
+            font-size: 14px;
+        }
+
+        #output {
+            white-space: pre;
+            font-size: 13px;
+        }
+
+        /* 将链接文字设为蓝色 */
+        a {
+            color: blue;
+        }
+
+        /* 将UE-ID文字设为绿色 */
+        #output span.ue-id {
+            color: green;
+        }
+
+        #output span.dl-tpt {
+            color: blue;
+        }
+
+        #output span.dl-bler {
+            color: blue;
+        }
+
+        #output span.ul-tpt {
+            color: red;
+        }
+
+        #output span.ul-bler {
+            color: red;
+        }
+
+        /* Added style for buttons */
+        button {
+            font-size: 13px;
+            /* Adjust the font size as needed */
+        }
+
+        /* Progress bar styles */
+        .progress {
+            width: 100%;
+            background-color: #ddd;
+        }
+
+        .bar {
+            height: 20px;
+            background-color: #4caf50;
+            text-align: center;
+            line-height: 20px;
+            color: white;
+            width: 0%; /* Initialize width to 0% */
+            transition: width 0.3s ease-in-out; /* Add smooth transition */
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // 修改parseContent函数，以处理文件上传事件并读取文件内容
+        function parseContent() {
+            var fileInput = document.getElementById('fileInput');
+            var file = fileInput.files[0];
+
+            if (file) {
+                var reader = new FileReader();
+                reader.onprogress = updateProgress;
+                reader.onload = function (event) {
+                    var inputText = event.target.result;
+                    processInput(inputText);
+                };
+                reader.readAsText(file);
+            } else {
+                alert('Please select a file.');
+            }
+        }
+
+        // 提取原始的文本处理逻辑，避免重复代码
+        function processInput(inputText) {
+            // 获取输入的文本区域内容
+            var lines = inputText.split('\n');
+            console.log("Number of Lines:", lines.length);
+
+            // 存储解析结果的字符串
+            var output = "";
+
+            // 存储不同UE-ID的UL-BLER数据
+            var ueData = {};
+            var timestamps = []; // 存储横坐标时间戳的数组
+
+            // 遍历每一行
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                console.log("Processing Line " + (i + 1) + ":", line);
+
+                // 检查是否包含"GNB DU Statistics  "
+                if (line.startsWith("GNB DU Statistics  ")) {
+                    var timestamp = line.substring(29, 38); // 提取时间戳，从第 29 个字符到第 38 个字符
+                    timestamps.push(timestamp); // 将时间戳添加到横坐标时间戳数组中
+                    continue;
+                }
+                // 检查是否包含 "UE-ID CELL-ID ON-SUL"
+                if (line.includes("UE-ID   CELL-ID   ON-SUL")) {
+                    // Check if the next line has numbers
+                    if (i + 1 < lines.length && /^\d/.test(lines[i + 1].trim())) {
+                        i++; // Skip the next line
+                        parseCellData(lines, i, ueData, timestamps.length - 1); // 传递时间戳索引
+                    }
+                }
+            }
+
+            // 为UL-BLER生成图表
+            generateChart(ueData, timestamps); // 将横坐标时间戳传递给生成图表的函数
+
+            // 将结果添加到HTML中
+            document.getElementById('output').innerHTML = output;
+        }
+
+
+        function updateProgress(event) {
+            if (event.lengthComputable) {
+                var percentLoaded = Math.round((event.loaded / event.total) * 100);
+                document.getElementById('progress').style.width = percentLoaded + '%';
+                document.getElementById('progress').innerHTML = percentLoaded + '%';
+            }
+        }
+
+        function parseCellData(lines, index, ueData, timestampIndex) {
+            console.log("Parsing Cell Data at Line " + (index + 1) + ": ", lines[index]);
+            var values = lines[index].trim().split(/\s+/);
+            var ueId = values[0];
+            var ulCrcSucc = parseFloat(values[18]);
+            var ulCrcFail = parseFloat(values[19]);
+
+            // calculate ul bler
+            var ul_bler = isNaN(ulCrcSucc) || isNaN(ulCrcFail) ? NaN : (ulCrcFail / (ulCrcSucc + ulCrcFail));
+
+            // Store UL-BLER data for each UE-ID
+            if (!isNaN(ul_bler)) {
+                if (!ueData[ueId]) {
+                    ueData[ueId] = [];
+                }
+                ueData[ueId].push({
+                    x: timestampIndex,
+                    y: ul_bler
+                }); //存储对象而非值
+            }
+
+            var output = "";
+            var ACK_TB0 = values[5].padEnd(8);
+            var NACK_TB0 = values[6].padEnd(8);
+            var dlMcs = values[13].padEnd(8);
+            var ulMcs = values[22].padEnd(8);
+
+            // calculate dl bler
+            try {
+                var dl_bler = parseFloat(NACK_TB0) / (parseFloat(ACK_TB0) + parseFloat(NACK_TB0));
+                dl_bler = isNaN(dl_bler) ? "NaN" : dl_bler.toFixed(4);
+                dl_bler = dl_bler.toString().padEnd(8);
+            } catch (error) {
+                var dl_bler = "NaN".padEnd(8);
+            }
+
+            // 返回结果字符串
+            output += "<span class='ue-id'>UE-ID=" + ueId + "</span>ACK-TB[0]=" + ACK_TB0 + "NACK-TB[0]=" + NACK_TB0 +
+                "<span class='dl-bler'>DL-BLER=" + dl_bler + "</span>DL-MCS=" +
+                dlMcs +
+                "UL-CRC-SUCC=" + ulCrcSucc + "UL-CRC-FAIL=" + ulCrcFail + "<span class='ul-bler'>UL-BLER=" + ul_bler +
+                "</span>UL-MCS=" + ulMcs +
+                "\n";
+
+            // 继续解析下一行数字
+            index++;
+            while (index < lines.length && /^\d/.test(lines[index].trim())) {
+                values = lines[index].trim().split(/\s+/);
+                ueId = values[0];
+                ACK_TB0 = values[5].padEnd(8);
+                NACK_TB0 = values[6].padEnd(8);
+                dlMcs = values[13].padEnd(8);
+                ulMcs = values[22].padEnd(8);
+
+                // calculate dl bler
+                try {
+                    var dl_bler = parseFloat(NACK_TB0) / (parseFloat(ACK_TB0) + parseFloat(NACK_TB0));
+                    dl_bler = isNaN(dl_bler) ? "NaN" : dl_bler.toFixed(4);
+                    dl_bler = dl_bler.toString().padEnd(8);
+                } catch (error) {
+                    var dl_bler = "NaN".padEnd(8);
+                }
+
+                ulCrcSucc = parseFloat(values[18]);
+                ulCrcFail = parseFloat(values[19]);
+
+                // calculate ul bler
+                var ul_bler = isNaN(ulCrcSucc) || isNaN(ulCrcFail) ? NaN : (ulCrcFail / (ulCrcSucc + ulCrcFail));
+
+                // Store UL-BLER data for each UE-ID
+                if (!isNaN(ul_bler)) {
+                    if (!ueData[ueId]) {
+                        ueData[ueId] = [];
+                    }
+                    ueData[ueId].push({
+                        x: timestampIndex,
+                        y: ul_bler
+                    }); //存储对象而非值
+                }
+
+                output += "<span class='ue-id'>UE-ID=" + ueId + "</span>ACK-TB[0]=" + ACK_TB0 + "NACK-TB[0]=" +
+                    NACK_TB0 +
+                    "<span class='dl-bler'>DL-BLER=" + dl_bler + "</span>DL-MCS=" +
+                    dlMcs +
+                    "UL-CRC-SUCC=" + ulCrcSucc + "UL-CRC-FAIL=" + ulCrcFail + "<span class='ul-bler'>UL-BLER=" +
+                    ul_bler + "</span>UL-MCS=" + ulMcs +
+                    "\n";
+                index++;
+            }
+
+            return output;
+        }
+
+        function generateChart(ueData, timestamps) {
+            // 销毁已存在的图表
+            var existingChart = Chart.getChart("ul-bler-chart");
+            if (existingChart) {
+                existingChart.destroy();
+            }
+
+            var ueIds = Object.keys(ueData);
+            var datasets = [];
+
+            ueIds.forEach(function (ueId, index) {
+                var data = ueData[ueId];
+                var hue = (360 * index / ueIds.length) % 360; // 使用不同的色调
+                var lineStyle = index % 2 === 0 ? 'dash' : 'dot'; // 判断线型
+                var borderColor, borderDash;
+
+                if (lineStyle === 'dash') {
+                    borderColor = 'hsl(' + hue + ', 70%, 50%)';
+                    borderDash = [10, 5]; // 虚线
+                } else {
+                    borderColor = 'hsl(' + hue + ', 70%, 50%)';
+                    borderDash = [2, 2]; // 点线
+                }
+
+                datasets.push({
+                    label: 'UE-ID ' + ueId,
+                    data: data,
+                    fill: false,
+                    borderColor: borderColor,
+                    borderDash: borderDash, // 指定线型
+                    tension: 0.1
+                });
+            });
+
+            var ctx = document.getElementById('ul-bler-chart').getContext('2d');
+            var chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: timestamps, // 使用动态生成的横坐标时间戳数组
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'UL-BLER for Different UE-IDs'
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            ticks: {
+                                callback: function (value, index, values) {
+                                    // 在这里根据索引获取对应的时间戳，然后返回适当的格式
+                                    return timestamps[value];
+                                }
+                            },
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</head>
+
+<body>
+    <h2>Parse du_stats_XXX.txt UL_BLER and draw</h2>
+    <p style="margin: 0;">Author: Dustin_Chen, email: <a href="mailto:Dustin_Chen@compal.com"
+            style="line-height: 1;">Dustin_Chen@compal.com</a> or <a href="mailto:chuhpsdustin@gmail.com"
+            style="line-height: 1;">chuhpsdustin@gmail.com</a></p>
+    <ul>
+        <li><strong>Please upload the du_stats_XXX.txt file below, then it will draw different UE-ID UL-BLER</strong>
+            <ul>
+                <li>formula: <span style="color: red;">UL-BLER</span> = UL-CRC-FAIL / (UL-CRC-SUCC + UL-CRC-FAIL)</li>
+            </ul>
+            <input type="file" id="fileInput" accept=".txt">
+            <br>
+            <button onclick="parseContent()">Parse_ulber_and_draw</button>
+            <!-- printToPDF button removed -->
+            <div class="progress">
+                <div id="progress" class="bar">0%</div>
+            </div>
+            <pre id="output"></pre>
+        </li>
+    </ul>
+    <div style="max-width: 900px; margin: 0; text-align: left;">
+        <div style="display: inline-block;">
+            <canvas id="ul-bler-chart" width="900" height="500" style="width: 900px; height: 500px;"></canvas>
+        </div>
+    </div>
+</body>
+
+</html>
