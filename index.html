@@ -23,10 +23,12 @@
             font-size: 13px;
         }
 
+        /* 將連結文字設為藍色 */
         a {
             color: blue;
         }
 
+        /* 將UE-ID文字設為綠色 */
         #output span.ue-id {
             color: green;
         }
@@ -47,81 +49,116 @@
             color: red;
         }
 
+        /* Added style for buttons */
         button {
             font-size: 13px;
-        }
-
-        .progress {
-            width: 30%; /* 修改進度條寬度為原來的 1/5 */
-            background-color: #ddd;
-            display: inline-block; /* 讓進度條與按鈕在同一行 */
-            margin-right: 10px; /* 添加間距 */
-            vertical-align: middle; /* 垂直居中對齊 */
-        }
-
-        .bar {
-            height: 20px;
-            background-color: #4caf50;
-            text-align: center;
-            line-height: 20px;
-            color: white;
-            width: 0%;
-            transition: width 0.3s ease-in-out;
+            /* Adjust the font size as needed */
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
-        function parseAndDraw(event) {
-            var file = event.target.files[0];
+        function parseContent() {
+            var fileInput = document.getElementById('fileInput');
+            var file = fileInput.files[0];
+            var reader = new FileReader();
+            var progressBar = document.getElementById('progressBar');
+            var progressText = document.getElementById('progressText');
 
-            if (file) {
-                var reader = new FileReader();
-                reader.onprogress = updateProgress;
-                reader.onload = function (event) {
-                    var inputText = event.target.result;
-                    processInput(inputText);
-                };
-                reader.readAsText(file);
-            } else {
-                alert('Please select a file.');
-            }
-        }
+            progressBar.value = 0;
+            progressText.textContent = 'Uploading';
 
-        function updateProgress(event) {
-            if (event.lengthComputable) {
-                var percentLoaded = Math.round((event.loaded / event.total) * 100);
-                document.getElementById('progress').style.width = percentLoaded + '%';
-                document.getElementById('progress').innerHTML = percentLoaded + '%';
-            }
-        }
+            reader.onloadstart = function () {
+                progressText.textContent = 'Progressing';
+            };
 
-        function processInput(inputText) {
-            var lines = inputText.split('\n');
-            console.log("Number of Lines:", lines.length);
-
-            var output = "";
-            var ueData = {};
-            var timestamps = [];
-
-            for (var i = 0; i < lines.length; i++) {
-                var line = lines[i].trim();
-                console.log("Processing Line " + (i + 1) + ":", line);
-
-                if (line.startsWith("GNB DU Statistics  ")) {
-                    var timestamp = line.substring(29, 38);
-                    timestamps.push(timestamp);
-                    continue;
+            reader.onprogress = function (event) {
+                if (event.lengthComputable) {
+                    var percentLoaded = Math.round((event.loaded / event.total) * 100);
+                    progressBar.value = percentLoaded;
+                    progressText.textContent = 'Progressing: ' + percentLoaded + '%';
                 }
-                if (line.includes("UE-ID   CELL-ID   ON-SUL")) {
-                    if (i + 1 < lines.length && /^\d/.test(lines[i + 1].trim())) {
-                        i++;
-                        parseCellData(lines, i, ueData, timestamps.length - 1);
+            };
+
+            reader.onload = function () {
+                var inputText = reader.result;
+                console.log("Input Text:", inputText);
+
+                var lines = inputText.split('\n');
+                console.log("Number of Lines:", lines.length);
+
+                var output = "";
+                var ueData = {};
+                var timestamps = [];
+
+                for (var i = 0; i < lines.length; i++) {
+                    var line = lines[i].trim();
+                    console.log("Processing Line " + (i + 1) + ":", line);
+
+                    if (line.startsWith("GNB DU Statistics  ")) {
+                        var timestamp = line.substring(29, 38);
+                        timestamps.push(timestamp);
+                        continue;
+                    }
+
+                    if (line.includes("UE-ID     BEAM-ID")) {
+                        if (i + 1 < lines.length && /^\d/.test(lines[i + 1].trim())) {
+                            i++;
+                            output += parseUEData(lines, i);
+                        }
+                    }
+                    if (line.includes("UE-ID   CELL-ID   ON-SUL")) {
+                        if (i + 1 < lines.length && /^\d/.test(lines[i + 1].trim())) {
+                            i++;
+                            parseCellData(lines, i, ueData, timestamps.length - 1);
+                        }
                     }
                 }
+
+                generateChart(ueData, timestamps);
+
+                document.getElementById('output').innerHTML = output;
+            };
+
+            reader.onloadend = function () {
+                progressBar.value = 100;
+                progressText.textContent = 'Upload Completed';
+            };
+
+            reader.readAsText(file);
+        }
+
+        function parseUEData(lines, index) {
+            var output = "";
+            console.log("Parsing UE Data at Line " + (index + 1) + ": ", lines[index]);
+
+            var values = lines[index].trim().split(/\s+/);
+            var ueId = values[0].padEnd(8);
+            var dlTpt = values[5].padEnd(8);
+            var ulTpt = values[7].padEnd(8);
+
+            while (index < lines.length) {
+                if (lines[index].trim() === "") {
+                    index++;
+                    continue;
+                }
+
+                if (lines[index].includes(
+                    "--------------------------------------------------------------------------------------------"
+                )) {
+                    break;
+                }
+
+                if (/^\d/.test(lines[index].trim())) {
+                    values = lines[index].trim().split(/\s+/);
+                    ueId = values[0].padEnd(8);
+                    dlTpt = values[5].padEnd(8);
+                    ulTpt = values[7].padEnd(8);
+                }
+
+                index++;
             }
 
-            generateChart(ueData, timestamps);
-            document.getElementById('output').innerHTML = output;
+            return output;
         }
 
         function parseCellData(lines, index, ueData, timestampIndex) {
@@ -130,9 +167,10 @@
             var ueId = values[0];
             var ulCrcSucc = parseFloat(values[18]);
             var ulCrcFail = parseFloat(values[19]);
+
             var ul_bler = isNaN(ulCrcSucc) || isNaN(ulCrcFail) ? NaN : (ulCrcFail / (ulCrcSucc + ulCrcFail));
 
-            if (!isNaN(ul_bler)) {
+            if (!isNaN(ul_bler) && (parseFloat(values[5]) !== 0 || parseFloat(values[7]) !== 0)) {
                 if (!ueData[ueId]) {
                     ueData[ueId] = [];
                 }
@@ -182,9 +220,10 @@
 
                 ulCrcSucc = parseFloat(values[18]);
                 ulCrcFail = parseFloat(values[19]);
+
                 var ul_bler = isNaN(ulCrcSucc) || isNaN(ulCrcFail) ? NaN : (ulCrcFail / (ulCrcSucc + ulCrcFail));
 
-                if (!isNaN(ul_bler)) {
+                if (!isNaN(ul_bler) && (parseFloat(values[5]) !== 0 || parseFloat(values[7]) !== 0)) {
                     if (!ueData[ueId]) {
                         ueData[ueId] = [];
                     }
@@ -219,23 +258,20 @@
             ueIds.forEach(function (ueId, index) {
                 var data = ueData[ueId];
                 var hue = (360 * index / ueIds.length) % 360;
-                var lineStyle = index % 2 === 0 ? 'dash' : 'dot';
-                var borderColor, borderDash;
+                var borderColor = 'hsl(' + hue + ', 70%, 50%)';
 
-                if (lineStyle === 'dash') {
-                    borderColor = 'hsl(' + hue + ', 70%, 50%)';
-                    borderDash = [10, 5];
-                } else {
-                    borderColor = 'hsl(' + hue + ', 70%, 50%)';
-                    borderDash = [2, 2];
+                var filteredData = [];
+                for (var i = 0; i < data.length; i++) {
+                    if (i === 0 || data[i].x - data[i - 1].x === 1) {
+                        filteredData.push(data[i]);
+                    }
                 }
 
                 datasets.push({
                     label: 'UE-ID ' + ueId,
-                    data: data,
+                    data: filteredData,
                     fill: false,
                     borderColor: borderColor,
-                    borderDash: borderDash,
                     tension: 0.1
                 });
             });
@@ -278,14 +314,14 @@
             style="line-height: 1;">Dustin_Chen@compal.com</a> or <a href="mailto:chuhpsdustin@gmail.com"
             style="line-height: 1;">chuhpsdustin@gmail.com</a></p>
     <ul>
-        <li><strong>Please upload the du_stats_XXX.txt file below, then it will draw different UE-ID UL-BLER</strong>
+        <li><strong>Upload the du_stats_XXX.txt file and it will draw different UE-ID UL-BLER automatically</strong>
             <ul>
-                <li>formula: <span style="color: red;">UL-BLER</span> = UL-CRC-FAIL / (UL-CRC-SUCC + UL-CRC-FAIL)</li>
+                <li>Formula: <span style="color: red;">UL-BLER</span> = UL-CRC-FAIL / (UL-CRC-SUCC + UL-CRC-FAIL)</li>
             </ul>
-            <input type="file" id="fileInput" accept=".txt" onchange="parseAndDraw(event)">
-            <div class="progress">
-                <div id="progress" class="bar">0%</div>
-            </div>
+            <input type="file" id="fileInput" onchange="parseContent()">
+            <progress id="progressBar" value="0" max="100"></progress>
+            <span id="progressText">0%</span>
+            <br>
             <pre id="output"></pre>
         </li>
     </ul>
