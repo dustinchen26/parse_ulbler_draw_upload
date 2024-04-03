@@ -143,8 +143,8 @@
                 }
 
                 if (lines[index].includes(
-                    "--------------------------------------------------------------------------------------------"
-                )) {
+                        "--------------------------------------------------------------------------------------------"
+                    )) {
                     break;
                 }
 
@@ -272,8 +272,19 @@
                     data: filteredData,
                     fill: false,
                     borderColor: borderColor,
-                    tension: 0.1
+                    tension: 0.1 // 預設情況下連接曲線
                 });
+
+                // 檢查並更改非連續時間的點
+                for (var j = 0; j < filteredData.length - 1; j++) {
+                    if (filteredData[j + 1].x - filteredData[j].x > 1) {
+                        filteredData.splice(j + 1, 0, {
+                            x: filteredData[j].x + 1,
+                            y: null
+                        }); // 插入 null 來斷開連接曲線
+                    }
+                }
+
             });
 
             var ctx = document.getElementById('ul-bler-chart').getContext('2d');
